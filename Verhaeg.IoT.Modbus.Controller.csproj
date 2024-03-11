@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-Verhaeg.IoT.Modbus.Controller-f68b9df5-4341-474e-a4d4-f7b08fd6e12d</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <DockerfileContext>.</DockerfileContext>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="8.0.0" />
+    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.19.5" />
+    <PackageReference Include="Serilog" Version="3.1.1" />
+    <PackageReference Include="Serilog.Enrichers.Thread" Version="3.1.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+    <PackageReference Include="Serilog.Sinks.SyslogMessages" Version="3.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Verhaeg.IoT.Configuration\Verhaeg.IoT.Configuration.csproj" />
+    <ProjectReference Include="..\Verhaeg.IoT.Ditto\Verhaeg.IoT.Ditto.csproj" />
+    <ProjectReference Include="..\Verhaeg.IoT.Fields\Verhaeg.IoT.Fields.csproj" />
+    <ProjectReference Include="..\Verhaeg.IoT.MQTT.Client\Verhaeg.IoT.MQTT.Client.csproj" />
+    <ProjectReference Include="..\Verhaeg.IoT.Processor\Verhaeg.IoT.Processor.csproj" />
+    <ProjectReference Include="..\Verhaeg.IoT.RS485.Client\Verhaeg.IoT.RS485.Client.csproj" />
+    <ProjectReference Include="..\Verhaeg.IoT.State\Verhaeg.IoT.State.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Configuration\Verhaeg.IoT.Modbus.Controller.service">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="D:\DataMario\Ontwikkeling\IoT\Scripts\RP122_Deploy_Verhaeg.IoT.Modbus.Controller.bat" />
+  </Target>
+</Project>
