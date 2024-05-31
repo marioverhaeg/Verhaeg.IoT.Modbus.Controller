@@ -221,10 +221,10 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                             float new_target_setpoint = (Convert.ToSingle(production) / 230 / 3);
                             smart_charge_setpoint = Convert.ToSingle(Math.Ceiling(new_target_setpoint));
                             Log.Debug("Smart charge setpoint set to " + smart_charge_setpoint + "A.");
-                            if (smart_charge_setpoint < 8)
+                            if (smart_charge_setpoint < 8f)
                             {
                                 Log.Debug("Overriding smart charge setpoint to 8A.");
-                                smart_charge_setpoint = 8;
+                                smart_charge_setpoint = 8f;
                             }
                             
                             Log.Debug("Adjusting target setpoint to " + smart_charge_setpoint + "A based on current generation of " + production + "W.");
@@ -263,19 +263,33 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             // p1d is data coming from P1 meter
             float current_max = Convert.ToSingle(new double[] { p1d.current_amps_p1, p1d.current_amps_p3, p1d.current_amps_p2 }.Max());
 
-            Log.Debug("Maximum grid amperare: " + current_max + "A.");
-            Log.Debug("Current delivery: " + p1d.current_delivery + "kW.");
+            Log.Debug("Maximum grid fase draw: " + current_max + "A.");
+            Log.Debug("Charge target: " + target_auto_a + "A.");
             // My grid connection is configured at 23A (by Shell Recharge)
             float max_send = 23.0f;
-            float min_send = 16.0f;
+            float min_send = 15.0f;
+
+            // car_power data is coming from separate (HomeWizard) meter, connected negative.
+            // Only re-evaluate setpoint if car is charging, otherwise keep setpoint constant.
+            float current_auto_a = 0.0f;
+            float current_rest = 0.0f;
+            if (car_power != null)
+            {
+                current_auto_a = Convert.ToSingle(Math.Ceiling(car_power.active_power_l1_w / 230.0 * -1));
+                Log.Debug("Car is charging with " + current_auto_a.ToString() + "A per phase.");
+                current_rest = current_max - current_auto_a;
+                Log.Debug("Other grid fase draw: " + current_rest + "A per phase.");
+            }
 
             if (car_power != null && p1d != null)
             {
+                // Risk on fase overload.
                 if (current_max >= 24)
                 {
                     Log.Debug("Current drain from grid larger than 24A. Returning " + current_max.ToString() + "A.");
                     return current_max;
                 }
+                // No charge requested.
                 else if (target_auto_a == 0.0)
                 {
                     Log.Debug("No charge required at this moment.");
@@ -283,46 +297,47 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                 }
                 else
                 {
-                    // car_power data is coming from separate (HomeWizard) meter, connected negative.
-                    // Only re-evaluate setpoint if car is charging, otherwise keep setpoint constant.
-                    float current_auto_a = Convert.ToSingle(Math.Ceiling(car_power.active_power_l1_w / 230.0));
-                    Log.Debug("Car is charging with " + current_auto_a.ToString() + "A per phase.");
-
-                    if (current_max - target_auto_a > 6)
+                    // Target + current below 24A, keep current target
+                    if (target_auto_a + current_rest < 24)
                     {
-                        Log.Debug("Power consumption is over 6A at this moment, reducing target charging speed to 10A.");
-                        target_auto_a = 10;
+                        Log.Debug("Target + current below 24A, keep current target");
+                    }
+                    // Target + current above 24A, reduce current target
+                    else if (target_auto_a + current_rest > 24)
+                    {                        
+                        target_auto_a = 24 - current_rest;
+                        Log.Debug("Target + current above 24A, reduce current target to " + target_auto_a + "A.");
                     }
 
                     float diff = Convert.ToSingle(Math.Round(current_auto_a - target_auto_a, 2));
                     Log.Debug("Difference between current and setpoint is " + diff + "A.");
 
-                    if (Math.Abs(diff) < 0.8f)
+                    if (Math.Abs(diff) < 1f)
                     {
-                        // Difference between setpoint and target is less than 0.8A. Keep charging speed stable.
+                        // Difference between setpoint and target is less than 1A. Keep charging speed stable.
                         Log.Debug("Setpoint within margin; stable charge speed.");
                         csmr_setpoint = 22.0f;
                     }
                     else
                     {
-                        Log.Debug("Difference between setpoint and current charge is higher than 0.8A.");
+                        Log.Debug("Difference between setpoint and current charge is higher than 1A.");
                         if (diff > 0)
                         {
                             Log.Debug("Decreasing charge speed.");
-                            csmr_setpoint = max_send;
+                            csmr_setpoint = 22.0f + (diff*0.1f);
                         }
                         else
                         {
                             if (current_auto_a == 0)
                             {
                                 Log.Debug("Starting car charge.");
-                                csmr_setpoint = 2;
+                                csmr_setpoint = min_send;
                             }
                             else
                             {
-                                // Current (A) is below target, send 17A to increase car charging speed.
+                                // Current (A) is below target, send xA to increase car charging speed.
                                 Log.Debug("Increasing charge speed.");
-                                csmr_setpoint = min_send;
+                                csmr_setpoint = max_send - target_auto_a - (diff * 0.1f);
                             }
                         }
                     }
