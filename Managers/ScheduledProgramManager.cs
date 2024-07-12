@@ -66,17 +66,26 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             if (t != null)
             {
                 Fields.Energy.ScheduledProgram spe = new Fields.Energy.ScheduledProgram(t);
-                if (spe != null && spe.planned_program_consumption != null)
+                if (spe.program_state == "cancelled")
                 {
-                    if (DateTime.UtcNow.Minute < 30)
+                    Log.Information("Program cancelled.");
+                    ChargingProgram cp = new ChargingProgram(0.0);
+                    cp.UpdateDigitalTwin();
+                }
+                else
+                {
+                    if (spe != null && spe.planned_program_consumption != null)
                     {
-                        DateTime dt = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, DateTime.UtcNow.Day, DateTime.UtcNow.Hour, 0, 0, 0, DateTimeKind.Utc);
-                        SetCSMRSetpoint(dt, spe.planned_program_consumption);
-                    }
-                    else
-                    {
-                        DateTime dt = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, DateTime.UtcNow.Day, DateTime.UtcNow.Hour, 30, 0, 0, DateTimeKind.Utc);
-                        SetCSMRSetpoint(dt, spe.planned_program_consumption);
+                        if (DateTime.UtcNow.Minute < 30)
+                        {
+                            DateTime dt = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, DateTime.UtcNow.Day, DateTime.UtcNow.Hour, 0, 0, 0, DateTimeKind.Utc);
+                            SetCSMRSetpoint(dt, spe.planned_program_consumption);
+                        }
+                        else
+                        {
+                            DateTime dt = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, DateTime.UtcNow.Day, DateTime.UtcNow.Hour, 30, 0, 0, DateTimeKind.Utc);
+                            SetCSMRSetpoint(dt, spe.planned_program_consumption);
+                        }
                     }
                 }
             }
@@ -90,7 +99,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
 
         private void SetCSMRSetpoint(DateTime dt, List<ProgramConsumption> lpc)
         {
-            ProgramConsumption pc = lpc.Where(x => x.timestamp == dt).FirstOrDefault();
+            ProgramConsumption? pc = lpc.Where(x => x.timestamp == dt).FirstOrDefault();
             if (pc != null)
             {
                 Log.Debug("Found matching timestamp in ScheduledProgram, starting/continuoing charge.");

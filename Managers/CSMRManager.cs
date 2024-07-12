@@ -202,7 +202,6 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
 
         private float ComputeSolarAmps()
         {
-            float return_value = 0.0f;
             if (Solar_Main != null && Solar_Tuin != null)
             {
                 if (smart_charge_setpoint == 0.0 || ComputeAmps())
@@ -216,7 +215,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                         // send 13A charge at 7kW
                         // send 16A charge at 9kW
                         
-                        if (production < 8000)
+                        if (production < 9000)
                         {
                             float new_target_setpoint = (Convert.ToSingle(production) / 230 / 3);
                             smart_charge_setpoint = Convert.ToSingle(Math.Ceiling(new_target_setpoint));
@@ -226,14 +225,12 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                                 Log.Debug("Overriding smart charge setpoint to 8A.");
                                 smart_charge_setpoint = 8f;
                             }
-                            
                             Log.Debug("Adjusting target setpoint to " + smart_charge_setpoint + "A based on current generation of " + production + "W.");
-                            return_value = smart_charge_setpoint;
                         }
                         else
                         {
                             Log.Debug("Set maximum setpoint.");
-                            return_value = 16;
+                            smart_charge_setpoint = 16.0f;
                         }
                     }
                     else
@@ -245,7 +242,6 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                 else
                 {
                     Log.Debug("Do not change smart charge value, currently set to " + smart_charge_setpoint + "A.");
-                    return_value = smart_charge_setpoint;
                 }
             }
             else
@@ -254,7 +250,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                 smart_charge_setpoint = 0;
             }
 
-            return return_value;
+            return smart_charge_setpoint;
         }
 
         // target_aut_a is target charge speed in A per phase.
@@ -266,8 +262,8 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             Log.Debug("Maximum grid fase draw: " + current_max + "A.");
             Log.Debug("Charge target: " + target_auto_a + "A.");
             // My grid connection is configured at 23A (by Shell Recharge)
-            float max_send = 23.0f;
-            float min_send = 15.0f;
+            float max_send = 25.0f;
+            float min_send = 10.0f;
 
             // car_power data is coming from separate (HomeWizard) meter, connected negative.
             // Only re-evaluate setpoint if car is charging, otherwise keep setpoint constant.
@@ -284,9 +280,9 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             if (car_power != null && p1d != null)
             {
                 // Risk on fase overload.
-                if (current_max >= 24)
+                if (current_max >= 24 && p1d.current_usage > 13000)
                 {
-                    Log.Debug("Current drain from grid larger than 24A. Returning " + current_max.ToString() + "A.");
+                    Log.Error("Current drain from grid larger than 24A and consumption larger than 13kW. Returning " + current_max.ToString() + "A.");
                     return current_max;
                 }
                 // No charge requested.
@@ -298,57 +294,35 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                 else
                 {
                     // Target + current below 24A, keep current target
-                    if (target_auto_a + current_rest < 24)
+                    if (target_auto_a + current_rest < max_send)
                     {
                         Log.Debug("Target + current below 24A, keep current target");
                     }
                     // Target + current above 24A, reduce current target
-                    else if (target_auto_a + current_rest > 24)
+                    else if (target_auto_a + current_rest > max_send)
                     {                        
-                        target_auto_a = 24 - current_rest;
+                        target_auto_a = max_send - current_rest;
                         Log.Debug("Target + current above 24A, reduce current target to " + target_auto_a + "A.");
                     }
 
                     float diff = Convert.ToSingle(Math.Round(current_auto_a - target_auto_a, 2));
                     Log.Debug("Difference between current and setpoint is " + diff + "A.");
 
-                    if (Math.Abs(diff) < 1f)
+                    if (target_auto_a > 0)
                     {
-                        // Difference between setpoint and target is less than 1A. Keep charging speed stable.
-                        Log.Debug("Setpoint within margin; stable charge speed.");
-                        csmr_setpoint = 22.0f;
+                        csmr_setpoint = min_send;
                     }
                     else
                     {
-                        Log.Debug("Difference between setpoint and current charge is higher than 1A.");
-                        if (diff > 0)
-                        {
-                            Log.Debug("Decreasing charge speed.");
-                            csmr_setpoint = 22.0f + (diff*0.1f);
-                        }
-                        else
-                        {
-                            if (current_auto_a == 0)
-                            {
-                                Log.Debug("Starting car charge.");
-                                csmr_setpoint = min_send;
-                            }
-                            else
-                            {
-                                // Current (A) is below target, send xA to increase car charging speed.
-                                Log.Debug("Increasing charge speed.");
-                                csmr_setpoint = max_send - target_auto_a - (diff * 0.1f);
-                            }
-                        }
+                        csmr_setpoint = max_send;
                     }
-                    Log.Debug("CSMR setpoint is " + csmr_setpoint + "A.");
                     return csmr_setpoint;
                 }
             }
             else
             {
                 Log.Debug("No car or solar data available.");
-                return Convert.ToSingle(max_send);
+                return max_send;
             }
 
         }
