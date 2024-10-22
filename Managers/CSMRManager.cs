@@ -177,7 +177,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                 }
                 else
                 {
-                    Log.Error("Modbus message cannot be parsed, ignoring message.");
+                    Log.Debug("Modbus message cannot be parsed, ignoring message.");
                 }
             }
             catch (Exception ex)
@@ -190,7 +190,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
         private bool ComputeAmps()
         {
             int minute = DateTime.Now.Minute;
-            if (minute % 5 == 0 && (DateTime.Now.Second == 0 || DateTime.Now.Second == 1))
+            if (minute % 3 == 0 && (DateTime.Now.Second == 0 || DateTime.Now.Second == 1))
             {
                 return true;
             }
@@ -208,13 +208,8 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                 {
                     long production = Solar_Main.active_power_w + (Solar_Tuin.active_power_w * -1);
                     Log.Debug("Current solar production: " + production + "wH.");
-                    if (production > 3000)
-                    {
-                        // Send 8A charge at 3kW
-                        // Send 10A charge at 5kW
-                        // send 13A charge at 7kW
-                        // send 16A charge at 9kW
-                        
+                    if (production > 4000)
+                    {                        
                         if (production < 9000)
                         {
                             float new_target_setpoint = (Convert.ToSingle(production) / 230 / 3);
@@ -231,6 +226,12 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                         {
                             Log.Debug("Set maximum setpoint.");
                             smart_charge_setpoint = 16.0f;
+                        }
+
+                        if (p1d.current_usage > 2000 && smart_charge_setpoint > 8f)
+                        {
+                            Log.Debug("Reducing smart_charge_setpoint with " + (Convert.ToSingle(p1d.current_usage) / 230 + "A."));
+                            smart_charge_setpoint = smart_charge_setpoint + 1000 - (Convert.ToSingle(p1d.current_usage) / 230);
                         }
                     }
                     else
@@ -262,7 +263,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             Log.Debug("Maximum grid fase draw: " + current_max + "A.");
             Log.Debug("Charge target: " + target_auto_a + "A.");
             // My grid connection is configured at 23A (by Shell Recharge)
-            float max_send = 25.0f;
+            float max_send = 20.5f;
             float min_send = 10.0f;
 
             // car_power data is coming from separate (HomeWizard) meter, connected negative.
@@ -271,60 +272,71 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             float current_rest = 0.0f;
             if (car_power != null)
             {
-                current_auto_a = Convert.ToSingle(Math.Ceiling(car_power.active_power_l1_w / 230.0 * -1));
+                current_auto_a = Convert.ToSingle(Math.Round(car_power.active_power_l1_w / 230.0 * -1,2));
                 Log.Debug("Car is charging with " + current_auto_a.ToString() + "A per phase.");
                 current_rest = current_max - current_auto_a;
                 Log.Debug("Other grid fase draw: " + current_rest + "A per phase.");
             }
 
-            if (car_power != null && p1d != null)
+            // TESTING
+            // target_auto_a = 7.0f;
+            // TESTING
+
+            if (car_power != null && p1d != null && target_auto_a != 0)
             {
                 // Risk on fase overload.
                 if (current_max >= 24 && p1d.current_usage > 13000)
                 {
-                    Log.Error("Current drain from grid larger than 24A and consumption larger than 13kW. Returning " + current_max.ToString() + "A.");
-                    return current_max;
+                    target_auto_a = max_send - current_rest;
+                    if (target_auto_a < 8)
+                    {
+                        target_auto_a = 0f;
+                    }
+                    Log.Error("Charge target: " + target_auto_a + "A.");
+                    Log.Error("Current drain: " + p1d.current_usage + "wH.");
+                    Log.Error("Current max: " + current_max + "A.");
+                    Log.Error("Current drain from grid larger than 24A and consumption larger than 13kW. Reduce current target to " + target_auto_a + "A.");
                 }
-                // No charge requested.
-                else if (target_auto_a == 0.0)
+                else if (target_auto_a + current_rest > max_send)
                 {
-                    Log.Debug("No charge required at this moment.");
-                    return max_send;
+                    target_auto_a = max_send - current_rest;
+                    Log.Error("Charge target: " + target_auto_a + "A.");
+                    Log.Error("Current drain: " + p1d.current_usage + "wH.");
+                    Log.Error("Current max: " + current_rest + "wH.");
+                    Log.Debug("Charge target + rest consumption > max_send. Reduce current target to " + target_auto_a + "A.");
                 }
-                else
-                {
-                    // Target + current below 24A, keep current target
-                    if (target_auto_a + current_rest < max_send)
-                    {
-                        Log.Debug("Target + current below 24A, keep current target");
-                    }
-                    // Target + current above 24A, reduce current target
-                    else if (target_auto_a + current_rest > max_send)
-                    {                        
-                        target_auto_a = max_send - current_rest;
-                        Log.Debug("Target + current above 24A, reduce current target to " + target_auto_a + "A.");
-                    }
 
-                    float diff = Convert.ToSingle(Math.Round(current_auto_a - target_auto_a, 2));
-                    Log.Debug("Difference between current and setpoint is " + diff + "A.");
-
-                    if (target_auto_a > 0)
-                    {
-                        csmr_setpoint = min_send;
-                    }
-                    else
-                    {
-                        csmr_setpoint = max_send;
-                    }
-                    return csmr_setpoint;
-                }
+                return ComputeSetpoint(target_auto_a, current_auto_a, max_send);
             }
             else
             {
                 Log.Debug("No car or solar data available.");
-                return max_send;
+                return 24.0f;
             }
 
+        }
+
+        public float ComputeSetpoint(float target_charge_a, float current_auto_a, float max_send)
+        {
+            float diff = Convert.ToSingle(Math.Round(current_auto_a - target_charge_a, 2));
+            Log.Debug("Difference between current and setpoint is " + diff + "A.");
+            if (current_auto_a < 1)
+            {
+                return 12.0f;
+            }
+            else if (Math.Abs(diff) < 1)
+            {
+                return max_send;
+            }
+            else if (diff > 0)
+            {
+                return (diff * 0.1f) + max_send;
+            }
+            else
+            {
+                return max_send - target_charge_a + current_auto_a;
+            }
+            
         }
 
         public void DebugAmperage(Amperage xa)
