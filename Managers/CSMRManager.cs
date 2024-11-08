@@ -155,13 +155,13 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                     Log.Debug("Sending: " + setpoint.ToString() + "A");
                     Amperage xa = new Amperage("Verhaeg.IoT.Energy:Xemex.Amperage", setpoint, setpoint, setpoint);
                     Response res = GenerateResponseFromAmperage(xa);
-                    Client.Instance().Send(res.raw_message);
+                    TcpClient.Instance().Send(res.raw_message);
                 }
                 else if (message.StartsWith("01034002"))
                 {
                     string response = "010302514205E500";
                     byte[] br = Convert.FromHexString(response);
-                    Client.Instance().Send(br);
+                    TcpClient.Instance().Send(br);
                 }
                 else if (message.StartsWith("01030C"))
                 {
@@ -262,8 +262,8 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
 
             Log.Debug("Maximum grid fase draw: " + current_max + "A.");
             Log.Debug("Charge target: " + target_auto_a + "A.");
-            // My grid connection is configured at 23A (by Shell Recharge)
-            float max_send = 20.5f;
+            // My grid connection is configured at 20A (by Shell Recharge)
+            float max_send = 20.0f;
             float min_send = 10.0f;
 
             // car_power data is coming from separate (HomeWizard) meter, connected negative.
@@ -322,18 +322,22 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             Log.Debug("Difference between current and setpoint is " + diff + "A.");
             if (current_auto_a < 1)
             {
+                Log.Debug("Car not charging, starting car charge.");
                 return 12.0f;
             }
             else if (Math.Abs(diff) < 1)
             {
+                Log.Debug("Difference between target and current is smaller than 1A.");
                 return max_send;
             }
             else if (diff > 0)
             {
+                Log.Debug("Difference between target and current > 0, decreasing charge speed.");
                 return (diff * 0.1f) + max_send;
             }
             else
             {
+                Log.Debug("Increasing charge speed.");
                 return max_send - target_charge_a + current_auto_a;
             }
             
