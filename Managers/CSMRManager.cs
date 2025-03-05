@@ -17,6 +17,7 @@ using System.Runtime.CompilerServices;
 using Verhaeg.IoT.Ditto;
 using Verhaeg.IoT.Ditto.Api20;
 using Verhaeg.IoT.Fields.Appliances.Car;
+using Verhaeg.IoT.Fields.Environment.Meteoserver;
 
 namespace Verhaeg.IoT.Modbus.Controller.Managers
 {
@@ -38,6 +39,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
         private Power Solar_Main;
         private Power Solar_Tuin;
         private ChargingProgram cp;
+        private Climate_Temperature ct;
 
         public static CSMRManager Instance()
         {
@@ -63,8 +65,11 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             Solar_Main = new Power("", 0, 0, 0, 0);
             Solar_Tuin = new Power("", 0, 0, 0, 0);
 
-            Thing t = DittoManager.Instance().GetThing("Verhaeg.IoT.CSMB.ChargingProgram:Enyaq");
-            cp = new ChargingProgram(t);
+            Thing t1 = DittoManager.Instance().GetThing("Verhaeg.IoT.CSMB.ChargingProgram:Enyaq");
+            cp = new ChargingProgram(t1);
+
+            Thing t2 = DittoManager.Instance().GetThing("Verhaeg.IoT.EMS.Climate:Molenhofweg.Temperature");
+            ct = new Climate_Temperature(t2);
         }
 
         public void UpdateValues(Fields.MQTT.Message e)
@@ -123,8 +128,12 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                     if (ditto_index == 30)
                     {
                         Log.Debug("Index = 30, updating data from Ditto.");
-                        Thing t = DittoManager.Instance().GetThing("Verhaeg.IoT.CSMB.ChargingProgram:Enyaq");
-                        cp = new ChargingProgram(t);
+                        Thing t1 = DittoManager.Instance().GetThing("Verhaeg.IoT.CSMB.ChargingProgram:Enyaq");
+                        cp = new ChargingProgram(t1);
+
+                        Thing t2 = DittoManager.Instance().GetThing("Verhaeg.IoT.EMS.Climate:Molenhofweg.Temperature");
+                        ct = new Climate_Temperature(t2);
+
                         Log.Debug("Resetting index.");
                         ditto_index = 0;
                     }
@@ -146,8 +155,20 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                     }
                     else
                     {
-                        // Check if smart (solar) charging can be used.
-                        setpoint = ComputeAmps(ComputeSolarAmps());
+                        if (DateTime.Now.ToLocalTime().Hour == 5)
+                        {
+                            if (ct.outside < 5)
+                            {
+                                Log.Debug("Outside temperature lower than 5C, heating between 5-6AM.");
+                                setpoint = ComputeAmps(Convert.ToSingle(16.0f));
+                            }
+                        }
+                        else
+                        {
+                            // Check if smart (solar) charging can be used.
+                            setpoint = ComputeAmps(ComputeSolarAmps());
+                        }
+                    
                     }
 
                     Request req = new Request(message);
@@ -183,7 +204,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             catch (Exception ex)
             {
                 Log.Error("Could not parse response.");
-                Log.Debug(ex.ToString());
+                Log.Error(ex.ToString());
             }
         }
 
@@ -261,7 +282,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             float current_max = Convert.ToSingle(new double[] { p1d.current_amps_p1, p1d.current_amps_p3, p1d.current_amps_p2 }.Max());
 
             Log.Debug("Maximum grid fase draw: " + current_max + "A.");
-            Log.Debug("Charge target: " + target_auto_a + "A.");
+            Log.Debug("Planned charge target: " + target_auto_a + "A.");
             // My grid connection is configured at 20A (by Shell Recharge)
             float max_send = 20.0f;
             float min_send = 10.0f;
@@ -292,20 +313,26 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                     {
                         target_auto_a = 0f;
                     }
-                    Log.Error("Charge target: " + target_auto_a + "A.");
-                    Log.Error("Current drain: " + p1d.current_usage + "wH.");
-                    Log.Error("Current max: " + current_max + "A.");
-                    Log.Error("Current drain from grid larger than 24A and consumption larger than 13kW. Reduce current target to " + target_auto_a + "A.");
+                    Log.Debug("Charge target: " + target_auto_a + "A.");
+                    Log.Debug("Current drain: " + p1d.current_usage + "kWh.");
+                    Log.Debug("Current max: " + current_max + "A.");
+                    Log.Debug("Current drain from grid larger than 24A and consumption larger than 13kW. Reduce current target to " + target_auto_a + "A.");
                 }
-                else if (target_auto_a + current_rest > max_send)
+                else if (target_auto_a + current_rest > max_send && p1d.current_usage > 3680)
                 {
+                    Log.Debug("Charge target: " + target_auto_a + "A.");
+                    Log.Debug("Current drain: " + p1d.current_usage + "kWh.");
+                    Log.Debug("Current max: " + current_max + "A.");
                     target_auto_a = max_send - current_rest;
-                    Log.Error("Charge target: " + target_auto_a + "A.");
-                    Log.Error("Current drain: " + p1d.current_usage + "wH.");
-                    Log.Error("Current max: " + current_rest + "wH.");
-                    Log.Debug("Charge target + rest consumption > max_send. Reduce current target to " + target_auto_a + "A.");
+                    Log.Debug("Charge target + rest consumption > max_send.");
                 }
 
+                if (target_auto_a < 8)
+                {
+                    target_auto_a = 0;
+                     
+                }
+                Log.Debug("Updated charge target: " + target_auto_a + "A.");
                 return ComputeSetpoint(target_auto_a, current_auto_a, max_send);
             }
             else
@@ -318,27 +345,35 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
 
         public float ComputeSetpoint(float target_charge_a, float current_auto_a, float max_send)
         {
-            float diff = Convert.ToSingle(Math.Round(current_auto_a - target_charge_a, 2));
-            Log.Debug("Difference between current and setpoint is " + diff + "A.");
-            if (current_auto_a < 1)
+            if (target_charge_a > 8)
             {
-                Log.Debug("Car not charging, starting car charge.");
-                return 12.0f;
-            }
-            else if (Math.Abs(diff) < 1)
-            {
-                Log.Debug("Difference between target and current is smaller than 1A.");
-                return max_send;
-            }
-            else if (diff > 0)
-            {
-                Log.Debug("Difference between target and current > 0, decreasing charge speed.");
-                return (diff * 0.1f) + max_send;
+                float diff = Convert.ToSingle(Math.Round(current_auto_a - target_charge_a, 2));
+                Log.Debug("Difference between current and setpoint is " + diff + "A.");
+                if (current_auto_a < 1)
+                {
+                    Log.Debug("Car not charging, starting car charge.");
+                    return 12.0f;
+                }
+                else if (Math.Abs(diff) < 1)
+                {
+                    Log.Debug("Difference between target and current is smaller than 1A.");
+                    return max_send;
+                }
+                else if (diff > 0)
+                {
+                    Log.Debug("Difference between target and current > 0, decreasing charge speed.");
+                    return (diff * 0.3f) + max_send;
+                }
+                else
+                {
+                    Log.Debug("Increasing charge speed.");
+                    return max_send - target_charge_a + current_auto_a;
+                }
             }
             else
             {
-                Log.Debug("Increasing charge speed.");
-                return max_send - target_charge_a + current_auto_a;
+                Log.Debug("No charge.");
+                return 25.0f;
             }
             
         }

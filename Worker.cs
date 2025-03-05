@@ -26,14 +26,16 @@ namespace Verhaeg.IoT.Modbus.Controller
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             DittoManager.Start(cdh.uri.ToString(), cdh.username, cdh.password);
-            EventManager.Start(mos_configuration.ipaddress, mos_configuration.port, mos_configuration.username, mos_configuration.password, "RP120/#");
+            List<string> lTopics = new List<string>();
+            lTopics.Add("RP120/#");
+            EventManager.Start(mos_configuration.ipaddress, mos_configuration.port, mos_configuration.username, mos_configuration.password, lTopics);
             MQTT.Client.Managers.EventManager.Instance().mqtt_event += Worker_mqtt_event;
             State.Time.HalfHour.Instance().TimeEvent += Worker_TimeEvent;
 
             ScheduledProgramManager.Instance().Write("");
 
             Thread.Sleep(2000);
-            RS485.Client.Client c = RS485.Client.Client.Instance();
+            RS485.Client.TcpClient c = RS485.Client.TcpClient.Instance();
             c.DataReceivedEvent += C_DataReceivedEvent;
 
             while (!stoppingToken.IsCancellationRequested)
@@ -50,13 +52,13 @@ namespace Verhaeg.IoT.Modbus.Controller
 
         private void Worker_mqtt_event(object? sender, Fields.MQTT.Message e)
         {
-            Log.Debug("Received message " + e.thingId.ditto_thingId);
+            // Log.Debug("Received message " + e.thingId.ditto_thingId);
             CSMRManager.Instance().UpdateValues(e);
         }
 
         private void C_DataReceivedEvent(object? sender, string e)
         {
-            Log.Debug("Received data via RS485.");
+            // Log.Debug("Received data via RS485.");
             CSMRManager.Instance().Write(e);
         }
     }
