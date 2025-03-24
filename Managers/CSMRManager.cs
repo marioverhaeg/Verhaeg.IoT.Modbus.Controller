@@ -104,13 +104,13 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                         case "P1/dsmr/reading/phase_power_current_l3":
                             current_amps_p3 = Convert.ToDouble(m.payload, CultureInfo.InvariantCulture);
                             break;
-                        case "RP120/Power/Verhaeg.IoT.Energy.Meter:Auto":
+                        case "Homewizard/Power/Verhaeg.IoT.Energy.Meter:Auto":
                             car_power = JsonConvert.DeserializeObject<Power>(m.payload);
                             break;
-                        case "RP120/Power/Verhaeg.IoT.Energy.Meter:Solar.Tuin":
+                        case "Homewizard/Power/Verhaeg.IoT.Energy.Meter:Solar.Tuin":
                             Solar_Tuin = JsonConvert.DeserializeObject<Power>(m.payload);
                             break;
-                        case "RP120/Power/Verhaeg.IoT.Energy.Meter:Solar":
+                        case "Homewizard/Power/Verhaeg.IoT.Energy.Meter:Solar":
                             Solar_Main = JsonConvert.DeserializeObject<Power>(m.payload);
                             break;
                         default:
