@@ -18,6 +18,8 @@ using Verhaeg.IoT.Ditto;
 using Verhaeg.IoT.Ditto.Api20;
 using Verhaeg.IoT.Fields.Appliances.Car;
 using Verhaeg.IoT.Fields.Environment.Meteoserver;
+using System.Globalization;
+using Verhaeg.IoT.Configuration.Energy;
 
 namespace Verhaeg.IoT.Modbus.Controller.Managers
 {
@@ -34,7 +36,12 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
         private float smart_charge_setpoint;
 
         // Values
-        private P1_data p1d;
+        private double current_usage;
+        private double current_amps_p1;
+        private double current_amps_p2;
+        private double current_amps_p3;
+
+
         private Power car_power;
         private Power Solar_Main;
         private Power Solar_Tuin;
@@ -70,27 +77,41 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
 
             Thing t2 = DittoManager.Instance().GetThing("Verhaeg.IoT.EMS.Climate:Molenhofweg.Temperature");
             ct = new Climate_Temperature(t2);
+
+            current_usage = -20000;
+            current_amps_p1 = 50;
+            current_amps_p2 = 50;
+            current_amps_p3 = 50;
         }
 
-        public void UpdateValues(Fields.MQTT.Message e)
+        public void UpdateValues(Fields.MQTT.Message m)
         {
             lock (update)
             {
                 try
                 {
-                    switch (e.topic)
+                    switch (m.topic)
                     {
-                        case "RP120/DSMR":
-                            p1d = JsonConvert.DeserializeObject<P1_data>(e.payload);
+                        case "P1/dsmr/reading/electricity_currently_delivered":
+                            current_usage = Convert.ToDouble(m.payload, CultureInfo.InvariantCulture);
+                            break;
+                        case "P1/dsmr/reading/phase_power_current_l1":
+                            current_amps_p1 = Convert.ToDouble(m.payload, CultureInfo.InvariantCulture);
+                            break;
+                        case "P1/dsmr/reading/phase_power_current_l2":
+                            current_amps_p2 = Convert.ToDouble(m.payload, CultureInfo.InvariantCulture);
+                            break;
+                        case "P1/dsmr/reading/phase_power_current_l3":
+                            current_amps_p3 = Convert.ToDouble(m.payload, CultureInfo.InvariantCulture);
                             break;
                         case "RP120/Power/Verhaeg.IoT.Energy.Meter:Auto":
-                            car_power = JsonConvert.DeserializeObject<Power>(e.payload);
+                            car_power = JsonConvert.DeserializeObject<Power>(m.payload);
                             break;
                         case "RP120/Power/Verhaeg.IoT.Energy.Meter:Solar.Tuin":
-                            Solar_Tuin = JsonConvert.DeserializeObject<Power>(e.payload);
+                            Solar_Tuin = JsonConvert.DeserializeObject<Power>(m.payload);
                             break;
                         case "RP120/Power/Verhaeg.IoT.Energy.Meter:Solar":
-                            Solar_Main = JsonConvert.DeserializeObject<Power>(e.payload);
+                            Solar_Main = JsonConvert.DeserializeObject<Power>(m.payload);
                             break;
                         default:
                             break;
@@ -249,10 +270,10 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                             smart_charge_setpoint = 16.0f;
                         }
 
-                        if (p1d.current_usage > 2000 && smart_charge_setpoint > 8f)
+                        if (current_usage > 2000 && smart_charge_setpoint > 8f)
                         {
-                            Log.Debug("Reducing smart_charge_setpoint with " + (Convert.ToSingle(p1d.current_usage) / 230 + "A."));
-                            smart_charge_setpoint = smart_charge_setpoint + 1000 - (Convert.ToSingle(p1d.current_usage) / 230);
+                            Log.Debug("Reducing smart_charge_setpoint with " + (Convert.ToSingle(current_usage) / 230 + "A."));
+                            smart_charge_setpoint = smart_charge_setpoint + 1000 - (Convert.ToSingle(current_usage) / 230);
                         }
                     }
                     else
@@ -279,7 +300,7 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
         private float ComputeAmps(float target_auto_a)
         {
             // p1d is data coming from P1 meter
-            float current_max = Convert.ToSingle(new double[] { p1d.current_amps_p1, p1d.current_amps_p3, p1d.current_amps_p2 }.Max());
+            float current_max = Convert.ToSingle(new double[] { current_amps_p1, current_amps_p3, current_amps_p2 }.Max());
 
             Log.Debug("Maximum grid fase draw: " + current_max + "A.");
             Log.Debug("Planned charge target: " + target_auto_a + "A.");
@@ -303,10 +324,10 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             // target_auto_a = 7.0f;
             // TESTING
 
-            if (car_power != null && p1d != null && target_auto_a != 0)
+            if (car_power != null && current_usage != -20000 && target_auto_a != 0)
             {
                 // Risk on fase overload.
-                if (current_max >= 24 && p1d.current_usage > 13000)
+                if (current_max >= 24 && current_usage > 13000)
                 {
                     target_auto_a = max_send - current_rest;
                     if (target_auto_a < 8)
@@ -314,14 +335,14 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
                         target_auto_a = 0f;
                     }
                     Log.Debug("Charge target: " + target_auto_a + "A.");
-                    Log.Debug("Current drain: " + p1d.current_usage + "kWh.");
+                    Log.Debug("Current drain: " + current_usage + "kWh.");
                     Log.Debug("Current max: " + current_max + "A.");
                     Log.Debug("Current drain from grid larger than 24A and consumption larger than 13kW. Reduce current target to " + target_auto_a + "A.");
                 }
-                else if (target_auto_a + current_rest > max_send && p1d.current_usage > 3680)
+                else if (target_auto_a + current_rest > max_send && current_usage > 3680)
                 {
                     Log.Debug("Charge target: " + target_auto_a + "A.");
-                    Log.Debug("Current drain: " + p1d.current_usage + "kWh.");
+                    Log.Debug("Current drain: " + current_usage + "kWh.");
                     Log.Debug("Current max: " + current_max + "A.");
                     target_auto_a = max_send - current_rest;
                     Log.Debug("Charge target + rest consumption > max_send.");
@@ -337,7 +358,18 @@ namespace Verhaeg.IoT.Modbus.Controller.Managers
             }
             else
             {
-                Log.Debug("No car or solar data available.");
+                if (car_power == null)
+                {
+                    Log.Debug("Waiting for first car data measurement...");
+                }
+                if (current_usage == -20000)
+                {
+                    Log.Debug("Waiting for first P1 data measurement...");
+                }
+                if (target_auto_a == 0)
+                {
+                    Log.Debug("Car charge target set to ZERO.");
+                }
                 return 24.0f;
             }
 

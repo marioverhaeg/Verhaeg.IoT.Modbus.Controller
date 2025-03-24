@@ -28,6 +28,7 @@ namespace Verhaeg.IoT.Modbus.Controller
             DittoManager.Start(cdh.uri.ToString(), cdh.username, cdh.password);
             List<string> lTopics = new List<string>();
             lTopics.Add("RP120/#");
+            lTopics.Add("P1/dsmr/reading/#");
             EventManager.Start(mos_configuration.ipaddress, mos_configuration.port, mos_configuration.username, mos_configuration.password, lTopics);
             MQTT.Client.Managers.EventManager.Instance().mqtt_event += Worker_mqtt_event;
             State.Time.HalfHour.Instance().TimeEvent += Worker_TimeEvent;
